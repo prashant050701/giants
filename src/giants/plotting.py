@@ -8,7 +8,6 @@ import lightkurve as lk
 import astropy.units as u
 import pickle
 from astroquery.mast import Catalogs
-from astropy.config import set_temp_cache
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 try:
@@ -100,7 +99,7 @@ def plot_summary(target, outdir='', save_data=False, save_fig=True,
     font = {'family' : 'sans',
         'size'   : 14}
     matplotlib.rc('font', **font)
-    plt.style.use('seaborn-muted')
+    plt.style.use('seaborn-v0_8-muted')
 
     if custom_lc is not None:
         lc = custom_lc
@@ -117,16 +116,22 @@ def plot_summary(target, outdir='', save_data=False, save_fig=True,
         aperture_mask = target.aperture_mask
         sectors = target.used_sectors
 
+        mask = target.link_mask[~target.mask]
+        try:
+            target.lc = target.lc[mask] # PHT HACK
+        except:
+            target.lc = target.lc
+
     freq, fts = calculate_fft(lc)
 
     # save the data
     if save_data:
         try:
             np.savetxt(os.path.join(outdir,'timeseries/'+str(ticid)+'.dat.ts'), np.transpose([lc.time.value, lc.flux.value]), fmt='%.8f', delimiter=' ')
-            np.savetxt(os.path.join(outdir,'fft/'+str(ticid)+'.dat.fft'), np.transpose([freq, fts]), fmt='%.8f', delimiter=' ')
+            np.savetxt(os.path.join(outdir,'fft/'+str(ticid)+'.dat.ts.fft'), np.transpose([freq, fts]), fmt='%.8f', delimiter=' ')
         except:
             np.savetxt(os.path.join(outdir,str(ticid)+'.dat.ts'), np.transpose([lc.time.value, lc.flux.value]), fmt='%.8f', delimiter=' ')
-            np.savetxt(os.path.join(outdir,str(ticid)+'.dat.fft'), np.transpose([freq, fts]), fmt='%.8f', delimiter=' ')
+            np.savetxt(os.path.join(outdir,str(ticid)+'.dat.ts.fft'), np.transpose([freq, fts]), fmt='%.8f', delimiter=' ')
 
     # fit BLS
     bls_results, bls_stats, bls_model = get_bls_results(lc)
@@ -149,14 +154,9 @@ def plot_summary(target, outdir='', save_data=False, save_fig=True,
         model_lc = None
         scaled_residuals = np.nan
 
-    try:
-        in_rms, out_rms = calc_in_out_rms(lc, period, t0, dur / 24.)
-    except:
-        in_rms, out_rms = np.nan, np.nan
-
     # save the transit stats
     with open(os.path.join(outdir, "transit_stats.txt"), "a+") as file:
-        file.write(f"{ticid} {depth:.5f} {depth_snr:.5f} {period.value:.5f} {t0.value:.5f} {dur:.5f} {scaled_residuals:.5f} {harmonic_del:.5f} {max_power:.5f} {in_rms:.5f} {out_rms:.5f}\n")
+                file.write(f"{ticid} {depth:.5f} {depth_snr:.5f} {period.value:.5f} {t0.value:.5f} {dur:.5f} {scaled_residuals:.5f} {harmonic_del:.5f} {max_power:.5f}\n")
 
     """Create the figure."""
     dims = (27, 36)
@@ -180,10 +180,6 @@ def plot_summary(target, outdir='', save_data=False, save_fig=True,
             rstar_string = '?'
             rstar = np.nan
         try:
-            mstar_string = f'{target.mstar:.2f}'
-        except:
-            mstar_string = '?'
-        try:
             teff_string = f'{target.teff:.0f}'
         except:
             teff_string = '?'
@@ -196,7 +192,7 @@ def plot_summary(target, outdir='', save_data=False, save_fig=True,
         except:
             V_string = '?'
         tefflabel = r'T$_{\rm eff}$'
-        param_string = rf'(RA, dec)={coord_string}, $R_\bigstar$={rstar_string} $R_\odot$, $M_\bigstar$={mstar_string} $M_\odot$, logg={logg_string}, {tefflabel}={teff_string} K, V={V_string}'
+        param_string = rf'(RA, dec)={coord_string}, $R_\bigstar$={rstar_string} $R_\odot$, logg={logg_string}, {tefflabel}={teff_string} K, V={V_string}'
     else:
         param_string, rstar = stellar_params(ticid)
     ax_top.annotate(param_string, size=20, xy=(0.5, 0.65), xycoords='axes fraction', ha='center', va='center')
@@ -257,9 +253,9 @@ def plot_summary(target, outdir='', save_data=False, save_fig=True,
 
     if save_fig:
         try:
-            fig.savefig(os.path.join(outdir,'plots/'+str(ticid)+'_summary.png'), bbox_inches='tight')
+            fig.savefig(os.path.join(outdir,'plots/'+str(ticid)+'_summary.png'))#, bbox_inches='tight')
         except:
-            fig.savefig(os.path.join(outdir, str(ticid)+'_summary.png'), bbox_inches='tight')
+            fig.savefig(os.path.join(outdir, str(ticid)+'_summary.png'))#, bbox_inches='tight')
 
 def fit_transit_model(lc, period, t0):
     """
@@ -481,7 +477,7 @@ def get_bls_results(lc):
     lc = lc[link_mask]
 
     model = BoxLeastSquares(lc.time, lc.flux)
-    results = model.power(np.linspace(2., 30., 5000), np.linspace(.1, 1., 1000))
+    results = model.power(np.linspace(1., 25., 7000), np.linspace(.1, .5, 1000))
 
     stats = model.compute_stats(results.period[np.argmax(results.power)], 
                                 results.duration[np.argmax(results.power)], 
@@ -514,7 +510,7 @@ def plot_bls(lc, ax, results=None):
     ax.set_xlabel("period [days]")
     ax.set_ylabel("log likelihood")
 
-    # Highlight the harmonics of the peak period
+    #the harmonics of the peak period is highlighted
     ax.axvline(period.value, alpha=0.4, lw=4, c='cornflowerblue')
     for n in range(2, 10):
         ax.axvline(n*period.value, alpha=0.4, lw=1, linestyle="dashed", c='cornflowerblue')
@@ -634,7 +630,6 @@ def plot_tpf(tpf, coords, ticid, aperture_mask, ax, show_colorbar=True, show_gai
                          aperture_mask=aperture_mask, mask_color=mask_color,
                          title=f'TIC {ticid}, cadence {fnumber}')
     if show_gaia_overlay:
-        # with set_temp_cache(f'/home/nsaunders/mendel-nas1/temp_cache/tic{ticid}_cache', delete=True):
         ax = add_gaia_figure_elements(tpf, coords, ax)
     else:
         plt.xlim([tpf.column+0.5, tpf.column+tpf.shape[1]-0.5])
@@ -655,7 +650,13 @@ def plot_diff_image(tpf, lcc, per, t0, dur, ax):
             try:
                 t_frames = np.where([np.min(np.abs(tt - t)) < (dur/2)/24. for t in tpf.time.value])
                 nt_frames = np.where([np.min(np.abs(tt + (dur/24.) - t)) < (dur/2)/24. for t in tpf.time.value])
-                rf = np.nanmean(tpf.flux.value[t_frames], axis=0) - np.nanmean(tpf.flux.value[nt_frames], axis=0)
+                if t_frames.size > 0 and nt_frames.size > 0:
+                    print('yo'*50)
+                    rf = np.nanmean(tpf.flux.value[t_frames], axis=0) - np.nanmean(tpf.flux.value[nt_frames], axis=0)
+                else:
+                    print("Warning: t_frames or nt_frames is empty. Skipping residual flux calculation.")
+                    rf = np.zeros_like(tpf.flux.value[0])  #or something else?
+                #rf = np.nanmean(tpf.flux.value[t_frames], axis=0) - np.nanmean(tpf.flux.value[nt_frames], axis=0)
                 if np.nansum(rf) == 0:
                     continue
                 else:
@@ -765,16 +766,11 @@ def stellar_params(ticid):
     dec = catalog_data['dec'][0]
     coords = f'({ra:.2f}, {dec:.2f})'
     rstar_val = catalog_data['rad'][0]
-    mstar_val = catalog_data['mass'][0]
     teff = catalog_data['Teff'][0]
     if np.isnan(rstar_val):
         rstar = '?'
     else:
         rstar = f'{rstar_val:.2f}'
-    if np.isnan(mstar_val):
-        mstar = '?'
-    else:
-        mstar = f'{mstar_val:.2f}'
     if np.isnan(teff):
         teff = '?'
     else:
@@ -787,31 +783,9 @@ def stellar_params(ticid):
     V = catalog_data['Vmag'][0]
 
     teffstring = r'T$_{\rm eff}$'
-    param_string = rf'(RA, dec)={coords}, $R_\bigstar$={rstar} $R_\odot$, $M_\bigstar$={mstar} $M_\odot$, logg={logg}, {teffstring}={teff} K, V={float(V):.2f}'
+    param_string = rf'(RA, dec)={coords}, $R_\bigstar$={rstar} $R_\odot$, logg={logg}, {teffstring}={teff} K, V={float(V):.2f}'
 
     return param_string, rstar_val
-
-def calc_in_out_rms(lc, period, t0, dur):
-    """
-    Calculate the RMS of the in-transit and out-of-transit data.
-
-    Parameters
-    ----------
-    lc : lightkurve.LightCurve
-        Light curve to fit.
-    period : float
-        Orbital period of the planet.
-    t0 : float
-        Epoch of the first transit.
-    dur : float
-        Duration of the transit.
-    """
-    tmask = lc.remove_nans().create_transit_mask(period, t0, dur)
-
-    in_rms = np.sqrt(np.nanmean(lc.remove_nans()[tmask].flux.value)**2)
-    out_rms = np.sqrt(np.nanmean(lc.remove_nans()[~tmask].flux.value)**2)
-
-    return in_rms, out_rms
 
 def plot_vetting_summary(target, outdir='', period=None, t0=None, save_fig=True, quick=True):
     """
@@ -830,7 +804,7 @@ def plot_vetting_summary(target, outdir='', period=None, t0=None, save_fig=True,
     font = {'family' : 'sans',
         'size'   : 14}
     matplotlib.rc('font', **font)
-    plt.style.use('seaborn-muted')
+    plt.style.use('seaborn-v0_8-muted')
 
     lc = target.lc
     lcc = target.lcc
@@ -838,6 +812,12 @@ def plot_vetting_summary(target, outdir='', period=None, t0=None, save_fig=True,
     tpf = target.tpf
     aperture_mask = target.aperture_mask
     sectors = target.used_sectors
+
+    mask = target.link_mask[~target.mask]
+    try:
+        target.lc = target.lc[mask] # PHT HACK
+    except:
+        target.lc = target.lc
 
     if period is None:
         bls_results, bls_stats = get_bls_results(lc)
